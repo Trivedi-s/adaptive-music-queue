@@ -4,8 +4,6 @@
 
 Jiang Aitong · Shloka Shreyans Trivedi · Aryan Rakeshbhai Shah
 
-> **Status:** Proposal stage. This repository has the project plan only. Code, experiments, and results will be added as work progresses.
-
 ---
 
 ## Overview
@@ -32,7 +30,7 @@ This project is a **small, inspectable, session-aware agent trained from scratch
 
 **Minimum scope:**
 
-- A catalog of **~500–2,000 tracks** with genre and audio-feature metadata
+- A catalog of **~500–1,000 tracks** with genre and audio-feature metadata
 - Simulated listening sessions of **15–30 recommendations**
 - Tracking of short-term feedback and a longer-term preference profile
 - Choosing the next track from a limited candidate set
@@ -44,41 +42,15 @@ This project is a **small, inspectable, session-aware agent trained from scratch
 
 ## AI Formulation
 
-The recommender is modeled as a **Markov Decision Process (MDP)**:
-
-- **State:** recent listening feedback, aggregate song features, current preference estimates
-- **Action:** choose the next candidate song, or a high-level style direction
-- **Environment:** returns a skip, completion, or like signal and updates the session
-- **Reward:** balances positive feedback against early skips, repetition, and diversity
+TBD
 
 ### Methods
 
-- **RL policy:** discretized **Q-learning**, implemented from scratch
-- **Baselines:**
-  - Content-similarity recommender
-  - Simple feedback-driven heuristic
-- **Stretch goal:** a **two-level policy**. The upper level decides whether to *persist*, *shift style*, or *explore*. The lower level ranks candidate tracks.
-
-> The project uses no pretrained recommenders and no imported RL libraries.
+TBD
 
 ## Evaluation
 
-The agent trains through repeated interactions with simulated listeners, optionally calibrated with accessible historical listening data. Evaluation uses **held-out listener profiles and session scenarios**.
-
-**Metrics,** compared across fixed random seeds:
-
-- Cumulative reward
-- Early-skip rate
-- Preference-shift recovery time
-- Catalog diversity
-- Repetition
-
-**Ablations:**
-
-- Removing session history
-- Removing exploration
-
-> Better results in simulation will not be presented as proof of real-world user satisfaction.
+TBD
 
 ## Roadmap
 
