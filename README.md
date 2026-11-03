@@ -124,7 +124,7 @@ and is tested against controlled simulated listeners whose ground-truth preferen
 
 **Minimum scope:**
 
-- A catalog of **~500–1,000 tracks** with genre and audio-feature metadata
+- A catalog of **~1,000–2,000 tracks** with genre and audio-feature metadata, downsampled from the Spotify Tracks Dataset [35]
 - Simulated listening sessions of **15–30 recommendations**
 - Tracking of short-term feedback and a longer-term preference profile
 - Choosing the next track from a limited candidate set
@@ -134,24 +134,154 @@ and is tested against controlled simulated listeners whose ground-truth preferen
 
 **Out of scope:** audio streaming integration.
 
+## Dataset
+
+We use the **Spotify Tracks Dataset** [35] ([Hugging Face](https://huggingface.co/datasets/maharshipandya/spotify-tracks-dataset), [Kaggle](https://www.kaggle.com/datasets/maharshipandya/-spotify-tracks-dataset)). It has ~114,000 tracks across 114 genre labels (~1,000 tracks per genre) and is released under a BSD license. Each row contains:
+
+| Group | Columns | Used for |
+|---|---|---|
+| Identity | `track_id`, `track_name`, `artists`, `album_name` | Deduplication, display, artist-repeat penalty |
+| Audio features | `danceability`, `energy`, `valence`, `acousticness`, `instrumentalness`, `speechiness`, `liveness`, `loudness`, `tempo` | Similarity space, style clusters, simulator preferences |
+| Musical | `key`, `mode`, `time_signature` | Optional transition-smoothness features |
+| Metadata | `track_genre`, `popularity`, `duration_ms`, `explicit` | Cluster sanity checks, familiarity vs. discovery |
+
+**Downscaling to ~1,000–2,000 tracks:**
+
+1. **Deduplicate.** The same `track_id` appears under several genres. Keep one row per `track_id` (and per `track_name` + `artists`), recording all of its genre labels.
+2. **Select ~10–15 genres** spread across the audio-feature space, e.g. acoustic, ambient, classical, country, edm, hip-hop, jazz, latin, metal, pop, r-n-b, rock. Then **stratify-sample ~100–150 tracks per genre** by popularity tercile, so each genre has both familiar and obscure tracks.
+3. **Clean and normalize.** Drop zero-tempo and duration outliers. Min-max scale `loudness` and `tempo` to [0, 1]. The other audio features are already in [0, 1].
+4. **Build style clusters.** Run *k*-means (*K* ≈ 8) on the normalized audio-feature vectors to get **style clusters**, the unit the agent reasons about. Check the clusters against the genre labels. Using genre families as clusters directly is the fallback.
+5. **Freeze the catalog** as a versioned CSV with a fixed random seed so that every experiment is reproducible.
+
 ## AI Formulation
 
-TBD
+The listener's current taste (their mood, or the style they want right now) is **hidden**. The system only sees feedback such as skips, completions and likes. That makes this a **partially observable** sequential decision problem, i.e. a POMDP [37]. We handle it in the standard way from the course: maintain a **belief** over the hidden state using an **HMM forward filter** [36], then learn a policy over a compact, discretized belief state with **temporal-difference RL**. This structure is also how we address the project's core question. Under the HMM, a single skip of a track the listener simply dislikes barely changes the belief, while a *run* of skips inside one style moves probability mass to other styles. That is how the agent can tell **track rejection** apart from a **preference shift**.
+
+### Environment: HMM Listener Simulator
+
+Each simulated listener is itself a hidden Markov model:
+
+- **Hidden state** *z<sub>t</sub>* ∈ {1, …, *K*}: the style cluster the listener currently wants.
+- **Long-term profile** *w*: a distribution over clusters giving the listener's broader taste.
+- **Transition model:** *z<sub>t+1</sub>* = *z<sub>t</sub>* with probability 1 − ρ. Otherwise it switches to a cluster drawn from *w*. Some profiles instead have a scheduled abrupt shift at a fixed step.
+- **Emission model:** the probability of a positive response to track *x* is a logistic function of its fit, P(listen | *x*, *z*) = σ(β · sim(*x*, μ<sub>*z*</sub>) + λ · popularity(*x*) − η · fatigue(*x*) + *b*). Here μ<sub>*z*</sub> is the cluster centroid and fatigue counts recent repeats of the same track or artist. Thresholds on a noisy draw map this probability to one of **early skip / late skip / complete / like / replay**.
+- **Track-specific dislikes:** each listener has a random set of tracks (~10%) they skip *regardless* of mood. This creates the ambiguity the agent has to resolve.
+
+| Profile | ρ (switch rate) | Behavior |
+|---|---|---|
+| Stable | ≈ 0 | One preferred style for the whole session |
+| Drifter | 0.05–0.10 | Gradually wanders between neighboring styles |
+| Abrupt shifter | scheduled | Switches style at a fixed step (e.g., step 10 of 25) |
+| Picky | ≈ 0 | High track-specific dislike rate, so many isolated skips that are *not* shifts |
+| Explorer | 0.10 | Rewards novelty and low-popularity tracks |
+
+### MDP Components (Agent's View)
+
+**Belief update.** After each recommendation, the agent updates its belief *b<sub>t</sub>*(*z*) with the HMM forward algorithm [36]:
+*b<sub>t+1</sub>*(*z'*) ∝ P(feedback<sub>t</sub> | *x<sub>t</sub>*, *z'*) · Σ<sub>*z*</sub> P(*z'* | *z*) *b<sub>t</sub>*(*z*).
+For this update the agent uses its own approximate listener model (ρ̂, β̂), not the simulator's true parameters.
+
+**State** *s<sub>t</sub>* is a small discretized tuple, so tabular methods remain feasible (≈ 150–300 states):
+
+| Component | Values |
+|---|---|
+| Is the current cluster the belief's argmax? | yes / no |
+| Belief confidence (max *b<sub>t</sub>*) | low / medium / high |
+| Skip streak | 0 / 1 / 2 / 3+ |
+| Last feedback | negative / neutral / positive |
+| Session phase | early / mid / late |
+
+**Actions** are *hierarchical*: a lightweight version of the options framework [34]. The RL agent chooses one of four **macro-actions**. A deterministic low-level selector then picks the concrete track from a candidate set of ~20.
+
+| Macro-action | Target cluster | Purpose |
+|---|---|---|
+| `STAY` | Current cluster | Exploit: treat the last skip as a one-off track rejection |
+| `BRIDGE` | Nearest neighboring cluster | Smooth, gradual transition |
+| `FOLLOW_BELIEF` | argmax *b<sub>t</sub>* | Follow an inferred preference shift |
+| `EXPLORE` | Least-visited or low-belief cluster | Discovery, and gathering information |
+
+The low-level selector ranks unplayed tracks in the target cluster by similarity to the session's liked-track centroid and to the long-term profile. It never repeats a track and penalizes repeating an artist within the last 5 tracks.
+
+**Reward** *r<sub>t</sub>*: like +2, replay +1.5, complete +1, late skip −0.5, early skip −1, plus −0.5 for an artist repeat. The weights are configurable and will be tuned once, then frozen.
+
+**Episode:** one session of 20–30 recommendations, with discount γ = 0.9.
 
 ### Methods
 
-TBD
+Every core method maps to course material, so all of it can be built and explained from first principles [1], [38]:
+
+| Component | Method | Course topic |
+|---|---|---|
+| Listener model and belief | HMM forward filtering | Markov Models, Hidden Markov Models (Oct 5–7) |
+| Problem framing | MDP / POMDP with belief state | MDPs, POMDPs (Oct 14–21) |
+| Model-based reference | Value iteration on an MDP estimated from simulator rollouts | MDPs; model-based RL (Oct 19–26) |
+| **Core learners** | **Tabular Q-learning** [18] and **SARSA** [39] with decaying ε-greedy | TD learning: SARSA and Q-learning (Oct 28) |
+| Simulator emission model | Logistic response function | Logistic regression (Nov 9) |
+| *Stretch:* function approximation | Linear Q-learning on the continuous belief vector, trained by gradient descent | Gradient descent (Nov 2); Deep RL (Nov 30) |
+
+**Baselines:**
+
+1. **Random:** a random unplayed track.
+2. **Content similarity:** always `STAY`, i.e. the nearest unplayed track to the last completed one [2].
+3. **Skip-streak heuristic:** switch cluster after *k* consecutive skips, with *k* tuned.
+4. **Sliding-window ε-greedy bandit over clusters:** adaptive but myopic [16].
+5. **Oracle:** knows the true hidden *z<sub>t</sub>*. This is an upper bound and is not deployable.
+
+Comparing the agents against baselines 3 and 4 tests the two key claims: that the **HMM belief** beats raw skip counting, and that **multi-step planning** beats myopic adaptation.
+
+**What makes this challenging:** the problem is partially observable, with a deliberately ambiguous signal (one skip can mean two different things). It has delayed credit assignment (an `EXPLORE` or `BRIDGE` step can pay off only several tracks later). It also involves three different solution paradigms: model-based vs. model-free, and on-policy vs. off-policy. Even so, the whole system remains tabular and inspectable.
 
 ## Evaluation
 
-TBD
+**Protocol:** train each agent on the simulator over many sessions (~10k–50k episodes per profile mix). Evaluate on **held-out random seeds**, with exploration turned off. Report mean ± 95% CI over 5 training seeds.
+
+**Metrics:**
+
+| Metric | What it measures |
+|---|---|
+| Mean session return | Overall satisfaction under the reward function |
+| Skip rate / early-skip rate | Direct listener dissatisfaction |
+| **Recovery time** | Tracks needed after a true preference shift until the agent recommends from the new style and gets a completion |
+| **False-switch rate** | How often the agent leaves the preferred style after an isolated track-specific skip (measured on the Picky profile) |
+| Intra-session diversity and repetition | Distinct clusters and artists per session; repeat rate |
+| Learning curves | Return vs. training episodes (sample efficiency) |
+
+**Ablations:**
+
+- **Belief vs. no belief:** replace the HMM belief features with the raw skip streak only.
+- **Q-learning vs. SARSA:** compare the off-policy and on-policy learners.
+- **Planning horizon:** γ ∈ {0, 0.5, 0.9}. With γ = 0 the agent reduces to a myopic, bandit-like learner.
+- **Model mismatch:** vary the agent's assumed ρ̂ against the simulator's true ρ.
+- **Model-free vs. model-based:** compare Q-learning with value iteration on the estimated MDP.
+
+**Hypotheses:**
+
+- **H1:** Belief-state agents have a lower false-switch rate than the skip-streak heuristic *and* a shorter recovery time than content similarity.
+- **H2:** γ > 0 beats γ = 0 on the Abrupt-shifter and Explorer profiles.
+- **H3:** Tabular Q-learning gets close to the value-iteration reference on the discretized MDP.
+
+**Interactive demo:** a small CLI or Streamlit app. A person plays the listener, marking each recommended track as skip, complete or like. The app shows the agent's live belief over styles and its chosen macro-action at each step.
 
 ## Roadmap
 
+The schedule is anchored to the course deadlines: Check-in 2 on **Nov 20** and the final deliverables on **Dec 11**.
+
+| Phase | Target | Tasks | Owner |
+|---|---|---|---|
+| 1. Data | Nov 9 | Download, deduplicate, downsample to ~1–2k tracks; normalize; *k*-means style clusters | TBD |
+| 2. Environment | Nov 14 | HMM listener simulator and 5 profiles; reward function; unit tests | TBD |
+| 3. Baselines and belief | Nov 18 | Random, similarity, skip-streak and bandit baselines; HMM forward filter | TBD |
+| 4. RL agents | Nov 20 (Check-in 2) | Tabular Q-learning and SARSA; first learning curves | TBD |
+| 5. Experiments | Nov 30 | Value-iteration reference; full metric suite; ablations; plots | TBD |
+| 6. Demo and stretch | Dec 6 | Interactive demo; *(stretch)* linear function approximation | TBD |
+| 7. Wrap-up | Dec 11 | Final README / report, tracker, walkthrough prep | All |
+
 - [ ] Track catalog and metadata preparation
 - [ ] Listener simulator and listener profiles
-- [ ] Baseline recommenders (content-similarity and heuristic)
-- [ ] Q-learning agent
+- [ ] Baseline recommenders (random, similarity, heuristic, bandit)
+- [ ] HMM belief filter
+- [ ] Q-learning and SARSA agents
+- [ ] Value-iteration reference
 - [ ] Controlled experiments and ablations
 - [ ] Evaluation plots
 - [ ] Interactive demo
@@ -227,3 +357,14 @@ TBD
 **Hierarchical RL**
 
 34. R. S. Sutton, D. Precup, and S. Singh, "Between MDPs and Semi-MDPs: A Framework for Temporal Abstraction in Reinforcement Learning," *Artificial Intelligence*, vol. 112, pp. 181–211, 1999.
+
+**Dataset**
+
+35. M. Pandya, "Spotify Tracks Dataset," Hugging Face / Kaggle, BSD license. [Hugging Face](https://huggingface.co/datasets/maharshipandya/spotify-tracks-dataset) · [Kaggle](https://www.kaggle.com/datasets/maharshipandya/-spotify-tracks-dataset)
+
+**HMMs, POMDPs, and TD learning**
+
+36. L. R. Rabiner, "A Tutorial on Hidden Markov Models and Selected Applications in Speech Recognition," *Proceedings of the IEEE*, vol. 77, no. 2, pp. 257–286, 1989.
+37. L. P. Kaelbling, M. L. Littman, and A. R. Cassandra, "Planning and Acting in Partially Observable Stochastic Domains," *Artificial Intelligence*, vol. 101, pp. 99–134, 1998.
+38. S. Russell and P. Norvig, *Artificial Intelligence: A Modern Approach*, 4th ed., Pearson, 2020.
+39. G. A. Rummery and M. Niranjan, "On-Line Q-Learning Using Connectionist Systems," Tech. Rep. CUED/F-INFENG/TR 166, Cambridge University Engineering Dept., 1994.
