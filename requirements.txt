@@ -1,2 +1,5 @@
-pandas
+pandas>=2.0
 datasets
+numpy>=2.0
+scikit-learn>=1.5
+matplotlib>=3.8

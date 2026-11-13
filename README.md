@@ -134,6 +134,23 @@ and is tested against controlled simulated listeners whose ground-truth preferen
 
 **Out of scope:** audio streaming integration.
 
+## Project Structure
+
+```
+adaptive-music-queue/
+├── data/
+│   ├── data.csv          # 2,000-track sample from the Spotify Tracks Dataset
+│   ├── catalog.csv       # data.csv + style cluster per track (read by all experiments)
+│   └── clusters.csv      # cluster centroids, sizes, descriptions, nearest neighbors
+├── scripts/
+│   ├── get_data.py       # download, clean, deduplicate and sample → data/data.csv
+│   └── cluster.py        # k-means style clusters → data/catalog.csv, data/clusters.csv
+├── figures/
+│   └── clusters.png      # PCA view of the clusters and genre-by-cluster heatmap
+├── requirements.txt
+└── README.md
+```
+
 ## Dataset
 
 We use the **Spotify Tracks Dataset** [35] ([Hugging Face](https://huggingface.co/datasets/maharshipandya/spotify-tracks-dataset), [Kaggle](https://www.kaggle.com/datasets/maharshipandya/-spotify-tracks-dataset)). It has ~114,000 tracks across 114 genre labels (~1,000 tracks per genre) and is released under a BSD license. Each row contains:
@@ -145,13 +162,45 @@ We use the **Spotify Tracks Dataset** [35] ([Hugging Face](https://huggingface.c
 | Musical | `key`, `mode`, `time_signature` | Optional transition-smoothness features |
 | Metadata | `track_genre`, `popularity`, `duration_ms`, `explicit` | Cluster sanity checks, familiarity vs. discovery |
 
-**Downscaling to ~1,000–2,000 tracks:**
+**Downscaling to 2,000 tracks** (`scripts/get_data.py` → `data/data.csv`):
 
-1. **Deduplicate.** The same `track_id` appears under several genres. Keep one row per `track_id` (and per `track_name` + `artists`), recording all of its genre labels.
-2. **Select ~10–15 genres** spread across the audio-feature space, e.g. acoustic, ambient, classical, country, edm, hip-hop, jazz, latin, metal, pop, r-n-b, rock. Then **stratify-sample ~100–150 tracks per genre** by popularity tercile, so each genre has both familiar and obscure tracks.
-3. **Clean and normalize.** Drop zero-tempo and duration outliers. Min-max scale `loudness` and `tempo` to [0, 1]. The other audio features are already in [0, 1].
-4. **Build style clusters.** Run *k*-means (*K* ≈ 8) on the normalized audio-feature vectors to get **style clusters**, the unit the agent reasons about. Check the clusters against the genre labels. Using genre families as clusters directly is the fallback.
-5. **Freeze the catalog** as a versioned CSV with a fixed random seed so that every experiment is reproducible.
+1. **Clean.** Drop rows with missing values, tracks shorter than 1 min or longer than 10 min, zero-tempo tracks (tempo 0 means missing), and spoken word (`speechiness` > 0.66). Exclude the non-music genres comedy, sleep, kids and children.
+2. **Deduplicate.** The same song can appear under several `track_id`s (single vs. album release), and the same `track_id` under several genres. Group by normalized `track_name` + `artists`, keep the most popular release, and merge all of its genre labels into `genres`.
+3. **Normalize.** Scale `tempo` and `loudness` to [0, 1] using the 1st–99th percentiles, so that a few extreme tracks don't squash the rest into a narrow range. The other audio features are already in [0, 1].
+4. **Select 15 genres** spread across the audio-feature space: acoustic, ambient, classical, country, edm, hip-hop, jazz, latin, metal, opera, pop, r-n-b, rock, techno, trip-hop. **Stratify-sample ~133 tracks per genre** across popularity terciles, so each genre has both familiar and obscure tracks (seed 50). A track tagged with several sampled genres is picked at most once.
+
+**Style clusters** (`scripts/cluster.py` → `data/catalog.csv`, `data/clusters.csv`, `figures/clusters.png`):
+
+5. **Choose features.** Cluster on 7 style features: `danceability`, `energy`, `valence`, `acousticness`, `instrumentalness`, `speechiness`, `tempo`. `liveness` is left out because it detects an audience in the recording rather than the style of the song. `loudness` is left out because it is strongly correlated with `energy` (r = 0.83) and would count the energy axis twice. Both columns stay in the catalog.
+6. **Run *k*-means with *K* = 8** (50 restarts, seed 0). Clusters are renumbered by centroid energy (0 = calmest, 7 = most intense) so that the ids are readable. `python scripts/cluster.py --sweep` prints the model-selection table for *K* = 5–14. *K* = 8 has the most stable clustering across seeds (pairwise ARI 0.99) with balanced sizes (175–389) and silhouette 0.25. Larger *K* drops below 0.85 stability and starts producing very small clusters.
+7. **Check against genres.** Audio features only partly recover genre labels (NMI ≈ 0.24 for every *K*). This is expected, since pop, rock, latin and edm overlap heavily in audio space. The clusters are coherent *styles* that cut across genre names, which is what the listener's mood is about:
+
+   | Cluster | Tracks | Artists | Main genres | Character |
+   |:---:|---:|---:|---|---|
+   | 0 | 225 | 119 | classical, ambient, opera | Instrumental, acoustic, calm |
+   | 1 | 214 | 144 | opera, jazz, acoustic | Acoustic vocal, slow, low energy |
+   | 2 | 194 | 167 | acoustic, opera, jazz | Acoustic, faster tempo |
+   | 3 | 228 | 176 | r-n-b, jazz, pop | Mellow, positive, semi-acoustic |
+   | 4 | 175 | 129 | techno, trip-hop, ambient | Electronic instrumental, dark |
+   | 5 | 313 | 252 | metal, edm, country | Energetic, dark, mid-tempo |
+   | 6 | 389 | 272 | latin, edm, hip-hop | Happy, danceable |
+   | 7 | 262 | 208 | metal, latin, country | Fast, high energy |
+
+   `data/clusters.csv` stores each centroid μ<sub>*z*</sub> (used by the simulator's sim(*x*, μ<sub>*z*</sub>)) and each cluster's nearest neighbor (the `BRIDGE` target).
+8. **Freeze the catalog.** `data/catalog.csv` is `data/data.csv` plus a `cluster` column. All experiments read this file. Both scripts use fixed seeds, and rerunning `scripts/cluster.py` reproduces it byte for byte.
+
+**Balance checks (no further resampling needed):**
+
+- *Cluster sizes* differ by about 2× (175–389). We keep this rather than rebalance, since the differences reflect real density in audio space. Even the smallest cluster can fill 6+ full sessions without repeating a track, and every cluster has at least 31 tracks in each popularity band (≤ 20, 21–50, > 50), so `STAY` never runs out of familiar or obscure options. Two implications for the code: the listener profile *w* is defined over *clusters*, so cluster size does not bias it; and the random baseline samples tracks uniformly, so it lands in cluster 6 about 19% of the time.
+- *Artist concentration* is low. There are 1,098 distinct main artists, and only 12 have 10 or more tracks. The most concentrated cluster is 0 (Mozart, 29 of 225 tracks, 13%), but it still has 119 distinct artists, so the "no artist repeat within 5 tracks" rule can always be satisfied. No artist cap is applied.
+
+**Reproduce:**
+
+```bash
+pip install -r requirements.txt
+python scripts/get_data.py    # downloads from Hugging Face, writes data/data.csv
+python scripts/cluster.py     # writes data/catalog.csv, data/clusters.csv, figures/clusters.png
+```
 
 ## AI Formulation
 
@@ -276,7 +325,7 @@ The schedule is anchored to the course deadlines: Check-in 2 on **Nov 20** and t
 | 6. Demo and stretch | Dec 6 | Interactive demo; *(stretch)* linear function approximation | TBD |
 | 7. Wrap-up | Dec 11 | Final README / report, tracker, walkthrough prep | All |
 
-- [ ] Track catalog and metadata preparation
+- [x] Track catalog and metadata preparation (`scripts/get_data.py`, `scripts/cluster.py`)
 - [ ] Listener simulator and listener profiles
 - [ ] Baseline recommenders (random, similarity, heuristic, bandit)
 - [ ] HMM belief filter
