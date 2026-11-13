@@ -1,0 +1,9 @@
+cluster,danceability,energy,valence,acousticness,instrumentalness,speechiness,tempo,size,artists,mean_popularity,top_genres,description,nearest_cluster,nearest_distance
+0,0.3632,0.1744,0.2618,0.9287,0.8616,0.0473,0.3346,225,119,28.6,"classical, ambient, opera","high instrumentalness, high acousticness, low energy",1,0.8392
+1,0.4012,0.2281,0.2301,0.8755,0.0313,0.04,0.2539,214,144,31.4,"opera, jazz, acoustic","high acousticness, low energy, low danceability",2,0.5058
+2,0.4694,0.4056,0.3429,0.6753,0.0249,0.0504,0.6623,194,167,38.8,"acoustic, opera, jazz","high tempo, high acousticness, low energy",1,0.5058
+3,0.644,0.537,0.6402,0.5899,0.0086,0.0695,0.3205,228,176,39.9,"r-n-b, jazz, pop","high valence, high acousticness, low instrumentalness",2,0.5108
+4,0.639,0.6775,0.3058,0.0965,0.7831,0.054,0.4355,175,129,40.4,"techno, trip-hop, ambient","high instrumentalness, low acousticness, low valence",5,0.7748
+5,0.5766,0.6811,0.3131,0.1093,0.0173,0.066,0.3381,313,252,47.7,"metal, edm, country","low acousticness, low valence, low instrumentalness",6,0.43
+6,0.7054,0.7585,0.7157,0.1186,0.0177,0.0748,0.3477,389,272,41.1,"latin, edm, hip-hop","high valence, high danceability, low acousticness",5,0.43
+7,0.534,0.7936,0.5489,0.1048,0.0138,0.1001,0.7643,262,208,41.0,"metal, latin, country","high tempo, high energy, low acousticness",6,0.4826

@@ -1,12 +1,15 @@
 """Build the track dataset from the Spotify Tracks Dataset.
 
 Output:
-  data.csv  2,000-track sample used for experiments (see README "Dataset")
+  data/data.csv  2,000-track sample used for experiments (see README "Dataset")
 """
+from pathlib import Path
+
 import pandas as pd
 from datasets import load_dataset
 
 SEED = 50
+OUT = Path(__file__).resolve().parents[1] / "data" / "data.csv"
 
 FEATURES = [
     "danceability", "energy", "valence", "acousticness",
@@ -101,5 +104,6 @@ for i, genre in enumerate(SAMPLE_GENRES):
         taken.update(chosen["track_id"])
 
 sample = pd.concat(picked, ignore_index=True)
-sample.to_csv("data.csv", index=False)
-print(f"Saved data.csv: {len(sample)} tracks across {sample['sample_genre'].nunique()} genres")
+OUT.parent.mkdir(exist_ok=True)
+sample.to_csv(OUT, index=False)
+print(f"Saved {OUT}: {len(sample)} tracks across {sample['sample_genre'].nunique()} genres")
