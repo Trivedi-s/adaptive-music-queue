@@ -1,4 +1,5 @@
 """Adaptive Music Queue: catalog, listener simulator, and agents."""
+from .agents import TDAgent
 from .belief import BeliefFilter, ListenerModel
 from .catalog import Catalog
 from .selector import N_MACROS, Choice, Macro, Selector
@@ -26,5 +27,6 @@ __all__ = [
     "RewardConfig",
     "Selector",
     "StepResult",
+    "TDAgent",
     "feedback_probs",
 ]

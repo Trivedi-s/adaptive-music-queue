@@ -144,19 +144,28 @@ adaptive-music-queue/
 │   └── clusters.csv      # cluster centroids, sizes, descriptions, nearest neighbors
 ├── scripts/
 │   ├── get_data.py       # download, clean, deduplicate and sample → data/data.csv
-│   └── cluster.py        # k-means style clusters → data/catalog.csv, data/clusters.csv
+│   ├── cluster.py        # k-means style clusters → data/catalog.csv, data/clusters.csv
+│   └── train_agents.py   # train + evaluate agents → results/, figures/learning_curves.png
 ├── amq/                  # the project package
 │   ├── catalog.py        # Catalog: tracks, features, clusters, similarity
 │   ├── simulator.py      # ListenerEnv: HMM listener simulator, 5 profiles, reward
 │   ├── selector.py       # Macro-actions and the low-level track selector
-│   └── belief.py         # BeliefFilter: HMM forward filter over the hidden style
+│   ├── belief.py         # BeliefFilter: HMM forward filter over the hidden style
+│   ├── state.py          # StateEncoder: belief + recent feedback → one of 216 states
+│   ├── agents.py         # TDAgent: tabular Q-learning and SARSA over macro-actions
+│   ├── bandit_baselines.py  # random and sliding-window bandit baselines
+│   └── evaluate.py       # episode runner, training loop, reference agents
 ├── tests/                # python -m unittest discover tests
 │   ├── test_simulator.py
 │   ├── test_selector.py
-│   └── test_belief.py
-├── baselines.py          # content-similarity and skip-streak baselines
+│   ├── test_belief.py
+│   ├── test_agents.py
+│   └── test_bandit_baselines.py
+├── baselines.py          # early content-similarity and skip-streak baselines
+├── results/              # learning_curves.csv, final.csv, summary.md
 ├── figures/
-│   └── clusters.png      # PCA view of the clusters and genre-by-cluster heatmap
+│   ├── clusters.png      # PCA view of the clusters and genre-by-cluster heatmap
+│   └── learning_curves.png  # TD agents vs. baselines on held-out listeners
 ├── requirements.txt
 └── README.md
 ```
@@ -265,15 +274,17 @@ The emission has the same form as the simulator's, but without the popularity, f
 
 Following the belief beats skip counting on every profile. ρ̂ also shows the core trade-off directly. With ρ̂ = 0 the agent never believes a shift happened, so Abrupt collapses. With a large ρ̂ it treats isolated skips as shifts, so Picky collapses.
 
-**State** *s<sub>t</sub>* is a small discretized tuple, so tabular methods remain feasible (≈ 150–300 states):
+**State** *s<sub>t</sub>* (`amq/state.py`) is a small discretized tuple, so tabular methods remain feasible: 2 × 3 × 4 × 3 × 3 = **216 states**, of which about two thirds can actually occur.
 
-| Component | Values |
-|---|---|
-| Is the current cluster the belief's argmax? | yes / no |
-| Belief confidence (max *b<sub>t</sub>*) | low / medium / high |
-| Skip streak | 0 / 1 / 2 / 3+ |
-| Last feedback | negative / neutral / positive |
-| Session phase | early / mid / late |
+| Component | Values | Definition |
+|---|---|---|
+| Is the current cluster the belief's argmax? | yes / no | Cluster of the last played track (home cluster before the first) vs. argmax *b<sub>t</sub>* |
+| Belief confidence (max *b<sub>t</sub>*) | low / medium / high | Cut at 1/3 and 2/3, close to the 33rd and 67th percentiles seen in simulated sessions |
+| Skip streak | 0 / 1 / 2 / 3+ | Consecutive skips just now |
+| Last feedback | negative / neutral / positive | Early skip / late skip or complete / replay or like |
+| Session phase | early / mid / late | First, middle or last third of the session |
+
+`Last feedback` encodes the *strength* of the last response rather than repeating the skip streak (a non-zero streak already means the last track was skipped). Together they distinguish an early skip from a late one, and a complete from a like.
 
 **Actions** are *hierarchical*: a lightweight version of the options framework [34]. The RL agent chooses one of four **macro-actions**, each naming a target cluster. A deterministic low-level selector (`amq/selector.py`) then picks the concrete track, so all learning happens at the macro level.
 
@@ -350,6 +361,36 @@ Comparing the agents against baselines 3 and 4 tests the two key claims: that th
 
 **Interactive demo:** a small CLI or Streamlit app. A person plays the listener, marking each recommended track as skip, complete or like. The app shows the agent's live belief over styles and its chosen macro-action at each step.
 
+## Results (Check-in 2)
+
+`python scripts/train_agents.py` trains tabular Q-learning and SARSA (`amq/agents.py`) for 20,000 sessions on a uniform mix of the five profiles (α = 0.02, γ = 0.9, ε decayed linearly 1.0 → 0.05 over the first 60%), with 5 training seeds each. Every 1,000 sessions it evaluates on held-out listeners with exploration off. Baselines share the same held-out listeners, so all comparisons are paired. The full run takes about 4 minutes with `--jobs 10` (the default of 4 parallel processes takes about 9).
+
+![Learning curves](figures/learning_curves.png)
+
+Mean session return (25 tracks) on 200 held-out listeners per profile. Learners: 20000 training episodes, α = 0.02, γ = 0.9, ε 1.0 → 0.05; mean ± 95% CI over 5 training seeds.
+
+| Agent | stable | drifter | abrupt | picky | explorer | **mean** |
+|---|---|---|---|---|---|---|
+| Q-learning | 12.39 ± 0.53 | 7.34 ± 0.62 | 5.80 ± 0.84 | -0.18 ± 0.53 | 0.47 ± 0.44 | **5.16 ± 0.46** |
+| SARSA | 12.51 ± 0.37 | 7.63 ± 0.39 | 5.98 ± 0.20 | 0.09 ± 0.58 | 0.53 ± 0.44 | **5.35 ± 0.15** |
+| Q-learning, no belief | 4.85 ± 4.03 | 2.92 ± 1.29 | 0.62 ± 0.91 | -5.19 ± 2.11 | -4.58 ± 0.71 | **-0.28 ± 1.35** |
+| random | -11.95 | -10.76 | -12.30 | -14.36 | -13.29 | **-12.53** |
+| content similarity (STAY) | -3.87 | -2.65 | -5.50 | -8.57 | -14.37 | **-6.99** |
+| skip-streak k=2 | 5.11 | 3.02 | 1.26 | -5.88 | -4.56 | **-0.21** |
+| sliding-window bandit | -9.49 | -9.06 | -10.21 | -12.77 | -11.78 | **-10.66** |
+| belief greedy (no learning) | 12.55 | 7.61 | 6.41 | -0.23 | 0.38 | **5.34** |
+| oracle | 19.77 | 20.73 | 20.89 | 10.08 | 14.41 | **17.18** |
+
+**What the numbers say:**
+
+- **The HMM belief is the decisive ingredient.** With the belief, both learners reach about +5.3 per session. The same Q-learner without it (state = skip streak, last feedback and phase only) reaches −0.3, no better than the hand-written skip-streak rule (−0.2). That is about +5.5 per session from the belief alone, consistent across all five profiles.
+- **Learning is fast.** Both belief-based learners reach their plateau within the first 1,000 sessions. SARSA is slightly more stable across training seeds (CI ±0.15 vs. ±0.46), consistent with its more cautious on-policy updates.
+- **RL does not yet beat simply following the belief** (5.35 vs. 5.34). The learned policy is sensible: `STAY` when the belief is confident and agrees with the current cluster, `EXPLORE` when uncertain early in the session, `BRIDGE` after a run of skips. But 86–93% of its picks are the same track `FOLLOW_BELIEF` would choose. When the current cluster is the belief's top cluster, `STAY` and `FOLLOW_BELIEF` coincide, and the remaining deviations gain too little to show. So far, multi-step planning (hypothesis H2) is **not** supported.
+- **The gap to the oracle (17.2) is about inference, not action choice.** The oracle uses the same selector and the same `FOLLOW_BELIEF` action, just with the true style. Closing the gap means getting to the right style faster.
+- **Myopic and static baselines do poorly.** The sliding-window bandit (−10.7) is close to random (−12.5). It picks a random track within its chosen cluster rather than using the shared selector, and its 10-step window is short for a 25-track session. Always `STAY` (−7.0) cannot react to shifts.
+
+**Next steps:** recovery-time and false-switch metrics (H1); the γ ∈ {0, 0.5, 0.9} ablation (H2); value iteration on the estimated MDP (H3); a ρ̂ mismatch ablation for the learners; and state or action refinements that give planning room to matter (for example making `EXPLORE` target the most informative cluster).
+
 ## Roadmap
 
 The schedule is anchored to the course deadlines: Check-in 2 on **Nov 20** and the final deliverables on **Dec 11**.
@@ -366,9 +407,9 @@ The schedule is anchored to the course deadlines: Check-in 2 on **Nov 20** and t
 
 - [x] Track catalog and metadata preparation (`scripts/get_data.py`, `scripts/cluster.py`)
 - [x] Listener simulator and listener profiles (`amq/simulator.py`)
-- [ ] Baseline recommenders (random, similarity, heuristic, bandit)
+- [x] Baseline recommenders (random, similarity, heuristic, bandit) (`amq/evaluate.py`, `amq/bandit_baselines.py`)
 - [x] HMM belief filter (`amq/belief.py`)
-- [ ] Q-learning and SARSA agents
+- [x] Q-learning and SARSA agents (`amq/agents.py`, `scripts/train_agents.py`)
 - [ ] Value-iteration reference
 - [ ] Controlled experiments and ablations
 - [ ] Evaluation plots
