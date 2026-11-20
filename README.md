@@ -148,10 +148,12 @@ adaptive-music-queue/
 ├── amq/                  # the project package
 │   ├── catalog.py        # Catalog: tracks, features, clusters, similarity
 │   ├── simulator.py      # ListenerEnv: HMM listener simulator, 5 profiles, reward
-│   └── selector.py       # Macro-actions and the low-level track selector
+│   ├── selector.py       # Macro-actions and the low-level track selector
+│   └── belief.py         # BeliefFilter: HMM forward filter over the hidden style
 ├── tests/                # python -m unittest discover tests
 │   ├── test_simulator.py
-│   └── test_selector.py
+│   ├── test_selector.py
+│   └── test_belief.py
 ├── baselines.py          # content-similarity and skip-streak baselines
 ├── figures/
 │   └── clusters.png      # PCA view of the clusters and genre-by-cluster heatmap
@@ -234,9 +236,34 @@ Each simulated listener is itself a hidden Markov model:
 
 ### MDP Components (Agent's View)
 
-**Belief update.** After each recommendation, the agent updates its belief *b<sub>t</sub>*(*z*) with the HMM forward algorithm [36]:
-*b<sub>t+1</sub>*(*z'*) ∝ P(feedback<sub>t</sub> | *x<sub>t</sub>*, *z'*) · Σ<sub>*z*</sub> P(*z'* | *z*) *b<sub>t</sub>*(*z*).
-For this update the agent uses its own approximate listener model (ρ̂, β̂), not the simulator's true parameters.
+**Belief update** (`amq/belief.py`). After each recommendation, the agent updates its belief with the HMM forward algorithm [36]. The hidden style *z<sub>t</sub>* judges track *t* and switches happen between tracks, so each step is an update followed by a prediction:
+
+- *update:* post<sub>t</sub>(*z*) ∝ *b<sub>t</sub>*(*z*) · P(feedback<sub>t</sub> | *x<sub>t</sub>*, *z*)
+- *predict:* *b<sub>t+1</sub>*(*z'*) = Σ<sub>*z*</sub> post<sub>t</sub>(*z*) · P(*z'* | *z*)
+
+The agent acts on *b<sub>t+1</sub>*, its belief about the style that will judge the *next* track. The prior *b*<sub>0</sub> is uniform.
+
+The agent uses its own approximate listener model (`ListenerModel`), not the simulator's true parameters:
+
+| Part | Agent's model | Default |
+|---|---|---|
+| Transition | Stay with prob 1 − ρ̂, else switch uniformly to one of the other *K* − 1 clusters (the agent does not know *w*) | ρ̂ = 0.05 |
+| Emission | P(fb \| *x*, *z*) = *d̂* · P<sub>dislike</sub>(fb) + (1 − *d̂*) · OrderedLogit(fb \| β̂ · sim(*x*, μ<sub>*z*</sub>) + *b̂*) | β̂ = 6, *b̂* = −3, *d̂* = 0.1 |
+
+The emission has the same form as the simulator's, but without the popularity, fatigue and novelty terms, which the agent cannot know. The dislike term *d̂* is what separates the two meanings of a skip. Every skip is partly explained by "they just don't like this song," so after four likes in a cluster a single skip leaves the belief's top cluster unchanged, while a run of three more skips moves it (tested for every cluster).
+
+*A property of the feedback model:* under an ordered logit, the middle outcome `complete` is not monotone in fit. P(complete) peaks at logit ≈ 1.25 and falls for better-fitting tracks, which tend to get a like or replay instead. So "complete rather than like" is weak evidence of a *moderate* fit, i.e. a neighboring cluster. This is correct inference under the simulator. In practice it makes no difference: a filter that merges all positive outcomes performs the same.
+
+*Sanity check* (100 seeds per profile, mean session return; the policy always plays `FOLLOW_BELIEF`):
+
+| ρ̂ | Stable | Drifter | Abrupt | Picky | Explorer |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 12.8 | 5.1 | −2.6 | 2.3 | −1.8 |
+| **0.05** | **12.5** | **6.3** | **6.5** | **−0.1** | **−0.2** |
+| 0.4 | 5.3 | 2.9 | 3.9 | −5.0 | −2.0 |
+| *Skip-counting, no belief* (`STAY`; `EXPLORE` after 2 skips) | 5.6 | 3.2 | 1.5 | −5.8 | −5.3 |
+
+Following the belief beats skip counting on every profile. ρ̂ also shows the core trade-off directly. With ρ̂ = 0 the agent never believes a shift happened, so Abrupt collapses. With a large ρ̂ it treats isolated skips as shifts, so Picky collapses.
 
 **State** *s<sub>t</sub>* is a small discretized tuple, so tabular methods remain feasible (≈ 150–300 states):
 
@@ -340,7 +367,7 @@ The schedule is anchored to the course deadlines: Check-in 2 on **Nov 20** and t
 - [x] Track catalog and metadata preparation (`scripts/get_data.py`, `scripts/cluster.py`)
 - [x] Listener simulator and listener profiles (`amq/simulator.py`)
 - [ ] Baseline recommenders (random, similarity, heuristic, bandit)
-- [ ] HMM belief filter
+- [x] HMM belief filter (`amq/belief.py`)
 - [ ] Q-learning and SARSA agents
 - [ ] Value-iteration reference
 - [ ] Controlled experiments and ablations
