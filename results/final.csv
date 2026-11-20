@@ -1,0 +1,106 @@
+agent,run,profile,mean_return
+Q-learning,0,stable,12.5775
+Q-learning,0,drifter,7.5125
+Q-learning,0,abrupt,6.1550
+Q-learning,0,picky,-0.0925
+Q-learning,0,explorer,0.3375
+Q-learning,1,stable,12.1425
+Q-learning,1,drifter,6.7225
+Q-learning,1,abrupt,5.3825
+Q-learning,1,picky,-0.2675
+Q-learning,1,explorer,0.0650
+Q-learning,2,stable,11.8475
+Q-learning,2,drifter,6.9325
+Q-learning,2,abrupt,4.8475
+Q-learning,2,picky,-0.7675
+Q-learning,2,explorer,0.9625
+Q-learning,3,stable,12.9650
+Q-learning,3,drifter,7.9475
+Q-learning,3,abrupt,6.5425
+Q-learning,3,picky,0.4200
+Q-learning,3,explorer,0.2750
+Q-learning,4,stable,12.4275
+Q-learning,4,drifter,7.5925
+Q-learning,4,abrupt,6.0600
+Q-learning,4,picky,-0.1925
+Q-learning,4,explorer,0.6925
+SARSA,0,stable,12.6525
+SARSA,0,drifter,8.1700
+SARSA,0,abrupt,5.8425
+SARSA,0,picky,0.1725
+SARSA,0,explorer,0.1800
+SARSA,1,stable,12.4850
+SARSA,1,drifter,7.5950
+SARSA,1,abrupt,6.0025
+SARSA,1,picky,0.0475
+SARSA,1,explorer,0.7400
+SARSA,2,stable,12.7850
+SARSA,2,drifter,7.4975
+SARSA,2,abrupt,5.8950
+SARSA,2,picky,0.3050
+SARSA,2,explorer,0.4825
+SARSA,3,stable,12.6100
+SARSA,3,drifter,7.4775
+SARSA,3,abrupt,6.2525
+SARSA,3,picky,0.5900
+SARSA,3,explorer,0.2350
+SARSA,4,stable,12.0100
+SARSA,4,drifter,7.4000
+SARSA,4,abrupt,5.9000
+SARSA,4,picky,-0.6550
+SARSA,4,explorer,1.0225
+"Q-learning, no belief",0,stable,6.2400
+"Q-learning, no belief",0,drifter,2.6125
+"Q-learning, no belief",0,abrupt,-0.0100
+"Q-learning, no belief",0,picky,-3.7075
+"Q-learning, no belief",0,explorer,-5.3800
+"Q-learning, no belief",1,stable,-0.9450
+"Q-learning, no belief",1,drifter,1.2400
+"Q-learning, no belief",1,abrupt,0.6800
+"Q-learning, no belief",1,picky,-7.9850
+"Q-learning, no belief",1,explorer,-3.9550
+"Q-learning, no belief",2,stable,6.3575
+"Q-learning, no belief",2,drifter,3.3425
+"Q-learning, no belief",2,abrupt,1.1600
+"Q-learning, no belief",2,picky,-4.9875
+"Q-learning, no belief",2,explorer,-4.6075
+"Q-learning, no belief",3,stable,6.1675
+"Q-learning, no belief",3,drifter,3.6600
+"Q-learning, no belief",3,abrupt,1.4900
+"Q-learning, no belief",3,picky,-5.2975
+"Q-learning, no belief",3,explorer,-4.1100
+"Q-learning, no belief",4,stable,6.4500
+"Q-learning, no belief",4,drifter,3.7275
+"Q-learning, no belief",4,abrupt,-0.2125
+"Q-learning, no belief",4,picky,-3.9775
+"Q-learning, no belief",4,explorer,-4.8325
+random,,stable,-11.9500
+random,,drifter,-10.7625
+random,,abrupt,-12.3050
+random,,picky,-14.3575
+random,,explorer,-13.2875
+content similarity (STAY),,stable,-3.8700
+content similarity (STAY),,drifter,-2.6450
+content similarity (STAY),,abrupt,-5.4975
+content similarity (STAY),,picky,-8.5750
+content similarity (STAY),,explorer,-14.3700
+skip-streak k=2,,stable,5.1125
+skip-streak k=2,,drifter,3.0175
+skip-streak k=2,,abrupt,1.2625
+skip-streak k=2,,picky,-5.8750
+skip-streak k=2,,explorer,-4.5600
+sliding-window bandit,,stable,-9.4950
+sliding-window bandit,,drifter,-9.0600
+sliding-window bandit,,abrupt,-10.2100
+sliding-window bandit,,picky,-12.7725
+sliding-window bandit,,explorer,-11.7775
+belief greedy (no learning),,stable,12.5550
+belief greedy (no learning),,drifter,7.6100
+belief greedy (no learning),,abrupt,6.4100
+belief greedy (no learning),,picky,-0.2325
+belief greedy (no learning),,explorer,0.3800
+oracle,,stable,19.7700
+oracle,,drifter,20.7275
+oracle,,abrupt,20.8850
+oracle,,picky,10.0825
+oracle,,explorer,14.4125
