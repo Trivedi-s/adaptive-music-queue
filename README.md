@@ -389,31 +389,110 @@ Mean session return (25 tracks) on 200 held-out listeners per profile. Learners:
 - **The gap to the oracle (17.2) is about inference, not action choice.** The oracle uses the same selector and the same `FOLLOW_BELIEF` action, just with the true style. Closing the gap means getting to the right style faster.
 - **Myopic and static baselines do poorly.** The sliding-window bandit (−10.7) is close to random (−12.5). It picks a random track within its chosen cluster rather than using the shared selector, and its 10-step window is short for a 25-track session. Always `STAY` (−7.0) cannot react to shifts.
 
-**Next steps:** recovery-time and false-switch metrics (H1); the γ ∈ {0, 0.5, 0.9} ablation (H2); value iteration on the estimated MDP (H3); a ρ̂ mismatch ablation for the learners; and state or action refinements that give planning room to matter (for example making `EXPLORE` target the most informative cluster).
+**Next steps:** see the [Project Tracker](#project-tracker) for the task list with owners and internal deadlines.
 
-## Roadmap
+## Project Tracker
 
-The schedule is anchored to the course deadlines: Check-in 2 on **Nov 20** and the final deliverables on **Dec 11**.
+Course deadlines: Check-in 2 on **Nov 20**, TA demo and walkthrough in the last week of classes (**Dec 7–11**), final deliverables on **Dec 11**. Internal deadlines below finish all code and experiments by **Dec 4**, leaving **Dec 5–11** for the final report, slides and walkthrough.
 
-| Phase | Target | Tasks | Owner |
+### Contributions to date
+
+Everything below can be checked against the commit history and pull requests on GitHub. Each member should add work done outside the repository (proposal and check-in writing, meetings, slides).
+
+**Shloka Shreyans Trivedi**
+
+- **Dataset sample** (PR #5, Nov 3; `scripts/get_data.py`, `data/data.csv`)
+  - Loads the Spotify Tracks dataset (~114k tracks) and drops rows with missing names, artists, genres or audio features.
+  - Merges duplicate releases of the same song: keeps the most popular release and the union of all its genre labels.
+  - Removes excluded genres and rescales tempo and loudness to [0, 1] using the 1st–99th percentiles.
+  - Draws a reproducible stratified sample: 2,000 tracks over 15 genres, each split evenly across popularity terciles (seed 50).
+- **Catalog interface** (PR #7, Nov 16; `amq/catalog.py`, `amq/__init__.py`)
+  - `Catalog` dataclass: track features, cluster labels, centroids, popularity, artist ids, cluster members and centroid distances.
+  - Defines the style-fit score `similarity(x, z) = 1 − ‖x − μ_z‖` that the simulator and the agent both use.
+- **HMM listener simulator** (PR #7, Nov 16; `amq/simulator.py`)
+  - `Feedback` enum with five ordered outcomes.
+  - Ordered-logit feedback model (`feedback_probs`, cut-points −1, 0, 2.5, 3.5).
+  - `ListenerProfile` and the five profiles: Stable, Drifter (neighbour switches), Abrupt (forced switch at track 10), Picky (30% dislikes) and Explorer.
+  - Per-listener Dirichlet taste vector, a hidden style path pre-sampled at `reset(seed)`, and dislike lists.
+  - Emission logit with style-fit, popularity, fatigue and cluster-novelty terms.
+  - `RewardConfig` (feedback rewards plus the artist-repeat penalty), and `ListenerEnv.reset`/`step`, which return ground truth for metrics in `StepResult.info`.
+- **Simulator tests** (PR #7; `tests/test_simulator.py`, 20 tests): feedback probabilities, profile behaviour, reproducibility from seeds, switching rules, rewards and input validation.
+
+**Jiang Aitong (Eve)**
+
+- **First baseline prototype** (PR #8, Nov 16; `baselines.py`): a content-similarity rule that plays the unplayed track nearest the last positively received track. It has since been replaced by the selector-based `STAY` baseline in `amq/evaluate.py` and is no longer imported.
+- **Bandit and random baselines** (PR #10, Nov 19; `amq/bandit_baselines.py`)
+  - `RandomBaseline`: a uniformly random unplayed track.
+  - `SlidingWindowBandit`: ε-greedy (ε = 0.1) over the 8 style clusters, using each cluster's mean reward over the last 10 plays, then a random unplayed track from the chosen cluster. This is the non-stationary bandit comparison.
+- **Baseline tests** (PR #10; `tests/test_bandit_baselines.py`, 9 tests): no repeated tracks, reproducibility from seeds, and the bandit adapting after its window slides past old rewards.
+
+**Aryan Rakeshbhai Shah**
+
+- **Project write-up in this README** (initial commit and PRs #2–#4, Oct 27–Nov 3)
+  - Background, and a literature survey of 9 method families with 38 references.
+  - Scope, the HMM / POMDP formulation, the methods plan, the evaluation plan and hypotheses, and the schedule.
+- **Style clusters and repository layout** (PR #6, Nov 13)
+  - `scripts/cluster.py`: k-means with K = 8 on 7 audio features (50 restarts). `--sweep` prints model-selection statistics (stability ARI 0.99, cluster sizes 175–389). Clusters are renumbered by energy and labelled with descriptions.
+  - Writes `data/catalog.csv`, `data/clusters.csv` and `figures/clusters.png`.
+  - Checked artist and cluster balance (no rebalancing needed), and organised the repository into `amq/`, `scripts/`, `data/`, `figures/` and `tests/`.
+- **Macro-actions and track selector** (PR #9, Nov 19; `amq/selector.py`, 17 tests)
+  - Four macro-actions (`STAY`, `BRIDGE`, `FOLLOW_BELIEF`, `EXPLORE`) with deterministic tie-breaks.
+  - Within-cluster track ranking: unplayed tracks only, recent artists last, closest to the tracks already enjoyed in that cluster.
+  - Neutral home cluster for the first track, and fallback when a cluster runs out of tracks.
+- **HMM belief filter** (PR #11, Nov 19; `amq/belief.py`, 14 tests)
+  - Forward-algorithm update and predict steps under the agent's own listener model (ρ̂, β̂, b̂, d̂).
+  - Tested against brute-force enumeration of hidden paths.
+  - ρ̂ sensitivity sweep reported in this README.
+- **State, agents, evaluation and Check-in 2 results** (PR #12, Nov 20; 17 tests)
+  - `amq/state.py`: a 216-state encoder of belief and recent feedback.
+  - `amq/agents.py`: tabular Q-learning and SARSA over macro-actions, with a no-belief ablation.
+  - `amq/evaluate.py`: training loop with ε decay, evaluation on held-out seeds, and the STAY, skip-streak, belief-greedy and oracle reference agents, plus wrappers that run Eve's baselines under the same protocol.
+  - `scripts/train_agents.py`: training over 5 seeds in parallel, 95% CIs, `results/*.csv`, `results/summary.md` and `figures/learning_curves.png`.
+
+### Status by component
+
+| Component | Files | Owner(s) | Status |
 |---|---|---|---|
-| 1. Data | Nov 9 | Download, deduplicate, downsample to ~1–2k tracks; normalize; *k*-means style clusters | TBD |
-| 2. Environment | Nov 14 | HMM listener simulator and 5 profiles; reward function; unit tests | TBD |
-| 3. Baselines and belief | Nov 18 | Random, similarity, skip-streak and bandit baselines; HMM forward filter | TBD |
-| 4. RL agents | Nov 20 (Check-in 2) | Tabular Q-learning and SARSA; first learning curves | TBD |
-| 5. Experiments | Nov 30 | Value-iteration reference; full metric suite; ablations; plots | TBD |
-| 6. Demo and stretch | Dec 6 | Interactive demo; *(stretch)* linear function approximation | TBD |
-| 7. Wrap-up | Dec 11 | Final README / report, tracker, walkthrough prep | All |
+| Dataset sample | `scripts/get_data.py`, `data/data.csv` | Shloka | Done (Nov 3) |
+| Style clusters | `scripts/cluster.py`, `data/catalog.csv`, `data/clusters.csv` | Aryan | Done (Nov 13) |
+| Catalog and listener simulator | `amq/catalog.py`, `amq/simulator.py` | Shloka | Done (Nov 16) |
+| Random and bandit baselines | `amq/bandit_baselines.py` | Eve | Done (Nov 19) |
+| Selector, belief filter, state, TD agents, evaluation | `amq/selector.py`, `amq/belief.py`, `amq/state.py`, `amq/agents.py`, `amq/evaluate.py` | Aryan | Done (Nov 20) |
+| Metrics beyond return (H1) | `amq/metrics.py` | Shloka | Planned (Nov 28) |
+| γ ablation (H2) and improved bandit | `scripts/`, `amq/bandit_baselines.py` | Eve | Planned (Dec 1) |
+| Value iteration (H3) and model-mismatch study | `amq/planning.py`, `scripts/` | Aryan | Planned (Dec 2) |
+| Interactive demo | `scripts/demo.py` | Aryan | Planned (Nov 26) |
+| Final report, slides, walkthrough | — | All | Dec 5–11 |
 
-- [x] Track catalog and metadata preparation (`scripts/get_data.py`, `scripts/cluster.py`)
+### Tasks for the next two weeks (Nov 21 – Dec 4)
+
+Each task is finished when its code is merged into `main` with tests passing and its result is added to this README.
+
+| ID | Owner | Task | Deliverable / "done when" | Internal deadline |
+|---|---|---|---|---|
+| S1 | Shloka | Update the README's *Environment: HMM Listener Simulator* section to match `amq/simulator.py`: clusters 0–7, switches always go to a *different* cluster, outcome order complete < replay < like, cut-points, the 80/20 dislike split, Explorer settings and the pre-sampled hidden path | README section reviewed by Aryan | Nov 24 |
+| S2 | Shloka | **Evaluation metrics** (`amq/metrics.py`), computed from the ground truth in `StepResult.info`: skip rate, share of tracks from the true style, **recovery time** after a hidden switch (tracks until the first positive response in the new style), **false-switch rate** (agent leaves the true style after a dislike), and diversity (distinct artists and clusters) | Function `session_metrics(history, infos)` with unit tests; `evaluate()` reports these metrics next to the return | Nov 28 |
+| S3 | Shloka | Team decision on the optional **listener-chosen first track** (`reset(seed, seed_track=…)`); implement and test it only if the team agrees | Decision recorded here; implementation (if agreed) with tests | Decision Nov 25, code Dec 2 |
+| E1 | Eve | Remove the unused root `baselines.py`, or move its content-similarity rule into `amq/bandit_baselines.py` with tests | No unused modules left at the repository root | Nov 24 |
+| E2 | Eve | **Selector-based bandit**: the bandit picks a cluster and the shared selector picks the track, so the comparison measures myopic cluster choice rather than random track choice. Sweep the window over {5, 10, 25} and ε over {0.05, 0.1, 0.2} | New agent registered in `REFERENCE_AGENTS`; tests; table of results by profile | Nov 28 |
+| E3 | Eve | **Discount ablation (H2)**: train Q-learning and SARSA with γ ∈ {0, 0.5, 0.9} (5 seeds each, `--jobs 4`), and report return and learning curves for each γ | Script or flag in `train_agents.py`; results table and figure in the README | Dec 1 |
+| A1 | Aryan | **Demo** (`scripts/demo.py`) with three modes: *watch* (one session with belief bars and the hidden switch revealed), *compare* (every agent on the same listener) and *interactive* (a person types skip / complete / like). Save the trained Q-table so the demo needs no training | Runs in under 5 s from saved results; tests for the non-interactive modes | Nov 26 |
+| A2 | Aryan | **Model-mismatch study**: give the agent a wrong ρ̂ ∈ {0, 0.2} and d̂ ∈ {0.05, 0.3}, retrain RL, and compare it with belief greedy using the same model. Also train per-profile agents. Success criterion, fixed in advance: RL beats belief greedy with non-overlapping 95% CIs | Results table in the README, reported whichever way it goes | Nov 30 |
+| A3 | Aryan | **Value iteration (H3)**: estimate the 216-state transition and reward model from logged sessions, solve it with value iteration (γ = 0.9), and evaluate the resulting policy on the same held-out listeners | `amq/planning.py` with tests; row added to the results table | Dec 2 |
+| ALL | All | **Code freeze**: all experiment PRs merged, `python -m unittest discover tests` passes, `results/summary.md` and the figures regenerated from `main` | Final results tables in the README | Dec 4 |
+| R1 | All | Final report: each member drafts the sections for their own components (Shloka: data and simulator; Eve: baselines and the H2 ablation; Aryan: formulation, belief, agents, H3 and mismatch), then everyone edits the full draft | Full report draft | Dec 7 |
+| R2 | All | Slides and walkthrough rehearsal; each member presents their own components and the demo is run live | Slides and one dry run | Dec 9 |
+
+- [x] Track catalog and style clusters (`scripts/get_data.py`, `scripts/cluster.py`)
 - [x] Listener simulator and listener profiles (`amq/simulator.py`)
-- [x] Baseline recommenders (random, similarity, heuristic, bandit) (`amq/evaluate.py`, `amq/bandit_baselines.py`)
+- [x] Baseline recommenders: random, similarity, skip-streak, bandit, belief greedy, oracle (`amq/evaluate.py`, `amq/bandit_baselines.py`)
 - [x] HMM belief filter (`amq/belief.py`)
-- [x] Q-learning and SARSA agents (`amq/agents.py`, `scripts/train_agents.py`)
-- [ ] Value-iteration reference
-- [ ] Controlled experiments and ablations
-- [ ] Evaluation plots
-- [ ] Interactive demo
+- [x] Q-learning and SARSA agents and learning curves (`amq/agents.py`, `scripts/train_agents.py`)
+- [ ] Metrics beyond return: recovery time, false switches, diversity (S2)
+- [ ] γ ablation (E3) and value-iteration reference (A3)
+- [ ] Model-mismatch study (A2)
+- [ ] Interactive demo (A1)
+- [ ] Final report, slides and walkthrough (R1, R2)
 
 ## Deliverables
 
