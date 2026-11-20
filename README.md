@@ -145,6 +145,14 @@ adaptive-music-queue/
 ├── scripts/
 │   ├── get_data.py       # download, clean, deduplicate and sample → data/data.csv
 │   └── cluster.py        # k-means style clusters → data/catalog.csv, data/clusters.csv
+├── amq/                  # the project package
+│   ├── catalog.py        # Catalog: tracks, features, clusters, similarity
+│   ├── simulator.py      # ListenerEnv: HMM listener simulator, 5 profiles, reward
+│   └── selector.py       # Macro-actions and the low-level track selector
+├── tests/                # python -m unittest discover tests
+│   ├── test_simulator.py
+│   └── test_selector.py
+├── baselines.py          # content-similarity and skip-streak baselines
 ├── figures/
 │   └── clusters.png      # PCA view of the clusters and genre-by-cluster heatmap
 ├── requirements.txt
@@ -240,16 +248,20 @@ For this update the agent uses its own approximate listener model (ρ̂, β̂), 
 | Last feedback | negative / neutral / positive |
 | Session phase | early / mid / late |
 
-**Actions** are *hierarchical*: a lightweight version of the options framework [34]. The RL agent chooses one of four **macro-actions**. A deterministic low-level selector then picks the concrete track from a candidate set of ~20.
+**Actions** are *hierarchical*: a lightweight version of the options framework [34]. The RL agent chooses one of four **macro-actions**, each naming a target cluster. A deterministic low-level selector (`amq/selector.py`) then picks the concrete track, so all learning happens at the macro level.
 
-| Macro-action | Target cluster | Purpose |
-|---|---|---|
-| `STAY` | Current cluster | Exploit: treat the last skip as a one-off track rejection |
-| `BRIDGE` | Nearest neighboring cluster | Smooth, gradual transition |
-| `FOLLOW_BELIEF` | argmax *b<sub>t</sub>* | Follow an inferred preference shift |
-| `EXPLORE` | Least-visited or low-belief cluster | Discovery, and gathering information |
+| Macro-action | Target cluster | Ties broken by | Purpose |
+|---|---|---|---|
+| `STAY` | Current cluster (that of the last played track) | none | Exploit: treat the last skip as a one-off track rejection |
+| `BRIDGE` | One of the 3 nearest clusters | highest belief → fewest visits → nearest | Smooth, gradual transition |
+| `FOLLOW_BELIEF` | argmax *b<sub>t</sub>* | nearest to current (a flat belief means stay) | Follow an inferred preference shift |
+| `EXPLORE` | Least-visited other cluster | highest belief → nearest | Discovery, and gathering information |
 
-The low-level selector ranks unplayed tracks in the target cluster by similarity to the session's liked-track centroid and to the long-term profile. It never repeats a track and penalizes repeating an artist within the last 5 tracks.
+Agents without a belief (the baselines) can use the same actions: a uniform belief is assumed. The visit-count tie-breaks mean repeated `BRIDGE` moves walk outward instead of bouncing between two neighboring clusters, and repeated `EXPLORE` moves eventually visit every cluster. Before the first track the selector treats the **home cluster** (the one closest to the catalog's average sound, cluster 3) as current.
+
+The **low-level selector** takes only unplayed tracks from the target cluster and moves artists heard in the last 5 tracks to the end of the list. It ranks the rest by distance to an *anchor*: the mean of the tracks the listener responded to positively in that cluster this session, or the cluster centroid if there are none. A typical track also gives the belief filter the clearest evidence about the hidden style. If the target cluster has no unplayed tracks, the nearest cluster that has some is used. The selector reads only the session history and the agent's own belief, never the simulator's ground truth. `Selector.candidates()` returns the top 20 for the demo.
+
+Sanity check (100 seeds per profile, mean session return over 25 tracks): `FOLLOW_BELIEF` given the *true* hidden style scores +10 to +21, always `STAY` scores −13 to −4, and random play scores −15 to −11. The best fixed macro differs by profile (`STAY` for Stable, `BRIDGE` for Explorer), which is the decision the RL agent has to learn.
 
 **Reward** *r<sub>t</sub>*: like +2, replay +1.5, complete +1, late skip −0.5, early skip −1, plus −0.5 for an artist repeat. The weights are configurable and will be tuned once, then frozen.
 
@@ -326,7 +338,7 @@ The schedule is anchored to the course deadlines: Check-in 2 on **Nov 20** and t
 | 7. Wrap-up | Dec 11 | Final README / report, tracker, walkthrough prep | All |
 
 - [x] Track catalog and metadata preparation (`scripts/get_data.py`, `scripts/cluster.py`)
-- [ ] Listener simulator and listener profiles
+- [x] Listener simulator and listener profiles (`amq/simulator.py`)
 - [ ] Baseline recommenders (random, similarity, heuristic, bandit)
 - [ ] HMM belief filter
 - [ ] Q-learning and SARSA agents
